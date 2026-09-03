@@ -14,22 +14,35 @@ import {
   TrendingUp, 
   Percent, 
   PackageCheck,
-  Check
+  Lock,
+  Mail,
+  User,
+  ArrowRight
 } from 'lucide-react';
 
 export default function App() {
+  // --- ESTADO DE AUTENTICAÇÃO ---
+  const [user, setUser] = useState(() => {
+    const savedUser = localStorage.getItem('calc3d_current_user');
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
+
+  const [authMode, setAuthMode] = useState('login'); // 'login' ou 'register'
+  const [authName, setAuthName] = useState('');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+
   // --- NAVEGAÇÃO DE ABAS ---
   const [activeTab, setActiveTab] = useState('calcular');
 
   // --- ABA: AJUSTES (PARÂMETROS GLOBAIS) ---
   const [settings, setSettings] = useState({
-    userNom: 'Rodrigo Mazze',
-    userEmail: 'rodrigo.lokky@gmail.com',
     energyCost: 1.25,        // R$/kWh
     printerPower: 200,       // Watts
     wearCost: 0.50,          // R$/h
     laborCost: 0.00,         // Valor da Mão de Obra
-    laborType: 'fixed',      // 'fixed' (Valor Fixo) ou 'hourly' (Por Hora)
+    laborType: 'fixed',      // 'fixed' ou 'hourly'
     packagingCost: 2.00,     // R$ por embalagem/kit
     defaultMargin: 100,      // %
     defaultTax: 6            // %
@@ -54,7 +67,7 @@ export default function App() {
   const [gramsPerUnit, setGramsPerUnit] = useState(200);
   const [timePerUnitHours, setTimePerUnitHours] = useState(4);
   const [kitQuantity, setKitQuantity] = useState(10);
-  const [kitTotalTimeHours, setKitTotalTimeHours] = useState(15); // Ex: 1 unid = 4h, mas kit com 10 = 15h
+  const [kitTotalTimeHours, setKitTotalTimeHours] = useState(15);
   const [marginPercent, setMarginPercent] = useState(200);
   const [taxPercent, setTaxPercent] = useState(6);
 
@@ -71,35 +84,87 @@ export default function App() {
     }
   ]);
 
+  // --- LÓGICA DE AUTENTICAÇÃO LOCAL ---
+  const handleAuthSubmit = (e) => {
+    e.preventDefault();
+    setAuthError('');
+
+    if (!authEmail || !authPassword) {
+      setAuthError('Preencha todos os campos obrigatórios.');
+      return;
+    }
+
+    const registeredUsers = JSON.parse(localStorage.getItem('calc3d_users') || '[]');
+
+    if (authMode === 'register') {
+      if (!authName) {
+        setAuthError('Informe seu nome para o cadastro.');
+        return;
+      }
+      const userExists = registeredUsers.some(u => u.email.toLowerCase() === authEmail.toLowerCase());
+      if (userExists) {
+        setAuthError('Este e-mail já está cadastrado.');
+        return;
+      }
+
+      const newUser = {
+        id: Date.now(),
+        name: authName,
+        email: authEmail.toLowerCase(),
+        password: authPassword,
+        createdAt: new Date().toISOString()
+      };
+
+      registeredUsers.push(newUser);
+      localStorage.setItem('calc3d_users', JSON.stringify(registeredUsers));
+      localStorage.setItem('calc3d_current_user', JSON.stringify(newUser));
+      setUser(newUser);
+    } else {
+      const foundUser = registeredUsers.find(
+        u => u.email.toLowerCase() === authEmail.toLowerCase() && u.password === authPassword
+      );
+
+      if (!foundUser) {
+        setAuthError('E-mail ou senha incorretos.');
+        return;
+      }
+
+      localStorage.setItem('calc3d_current_user', JSON.stringify(foundUser));
+      setUser(foundUser);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('calc3d_current_user');
+    setUser(null);
+    setAuthEmail('');
+    setAuthPassword('');
+    setAuthName('');
+  };
+
   // --- MOTOR DE CÁLCULO REATIVO ---
   const currentFilament = filaments.find(f => f.id === selectedFilamentId) || filaments[0];
 
-  // Quantidades totais do Kit
   const totalGramsKit = (parseFloat(gramsPerUnit) || 0) * (parseInt(kitQuantity) || 1);
   const totalHoursKit = parseFloat(kitTotalTimeHours) || 0;
 
-  // Custos do Kit
   const filamentCostKit = (totalGramsKit / 1000) * (currentFilament ? currentFilament.pricePerKg : 0);
   const energyKWhKit = ((parseFloat(settings.printerPower) || 0) / 1000) * totalHoursKit;
   const energyCostKit = energyKWhKit * (parseFloat(settings.energyCost) || 0);
   const wearCostKit = totalHoursKit * (parseFloat(settings.wearCost) || 0);
   
-  // Mão de obra (Fixo vs Hora)
   const laborCostKit = settings.laborType === 'fixed' 
     ? (parseFloat(settings.laborCost) || 0)
     : (parseFloat(settings.laborCost) || 0) * totalHoursKit;
 
   const packagingCostKit = (parseFloat(settings.packagingCost) || 0);
 
-  // Custo Base Total do Kit
   const baseCostKit = filamentCostKit + energyCostKit + wearCostKit + laborCostKit + packagingCostKit;
   
-  // Margem de Lucro e Imposto
   const marginValueKit = baseCostKit * ((parseFloat(marginPercent) || 0) / 100);
   const subtotalWithMargin = baseCostKit + marginValueKit;
   const taxValueKit = subtotalWithMargin * ((parseFloat(taxPercent) || 0) / 100);
   
-  // Valores Finais
   const finalKitPrice = subtotalWithMargin + taxValueKit;
   const finalUnitPrice = (parseInt(kitQuantity) || 1) > 0 ? finalKitPrice / parseInt(kitQuantity) : finalKitPrice;
 
@@ -136,6 +201,112 @@ export default function App() {
     alert('Orçamento salvo com sucesso no Histórico!');
   };
 
+  // --- RENDERIZAÇÃO: TELA DE LOGIN (SE NÃO ESTIVER LOGADO) ---
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#0d0d0d] text-slate-100 flex items-center justify-center p-4 font-sans select-none">
+        <div className="w-full max-w-md bg-[#141414] border border-neutral-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-2xl">
+          
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 bg-[#ff5500]/10 border border-[#ff5500]/30 rounded-2xl flex items-center justify-center mx-auto text-[#ff5500]">
+              <Calculator className="w-6 h-6" />
+            </div>
+            <h1 className="text-2xl font-black text-white tracking-tight">Calculadora 3D</h1>
+            <p className="text-xs text-neutral-400">
+              {authMode === 'login' ? 'Entre para acessar seus orçamentos' : 'Crie sua conta para começar'}
+            </p>
+          </div>
+
+          {authError && (
+            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-bold p-3 rounded-xl text-center">
+              {authError}
+            </div>
+          )}
+
+          <form onSubmit={handleAuthSubmit} className="space-y-4">
+            {authMode === 'register' && (
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Nome Completo</label>
+                <div className="relative">
+                  <User className="w-4 h-4 absolute left-4 top-3.5 text-neutral-500" />
+                  <input 
+                    type="text" 
+                    placeholder="Seu nome"
+                    value={authName}
+                    onChange={(e) => setAuthName(e.target.value)}
+                    className="w-full bg-[#0d0d0d] border border-neutral-800 rounded-xl pl-11 pr-4 py-3 text-sm text-white focus:outline-none focus:border-[#ff5500]"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">E-mail</label>
+              <div className="relative">
+                <Mail className="w-4 h-4 absolute left-4 top-3.5 text-neutral-500" />
+                <input 
+                  type="email" 
+                  placeholder="seu@email.com"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  className="w-full bg-[#0d0d0d] border border-neutral-800 rounded-xl pl-11 pr-4 py-3 text-sm text-white focus:outline-none focus:border-[#ff5500]"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Senha</label>
+              <div className="relative">
+                <Lock className="w-4 h-4 absolute left-4 top-3.5 text-neutral-500" />
+                <input 
+                  type="password" 
+                  placeholder="••••••••"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  className="w-full bg-[#0d0d0d] border border-neutral-800 rounded-xl pl-11 pr-4 py-3 text-sm text-white focus:outline-none focus:border-[#ff5500]"
+                />
+              </div>
+            </div>
+
+            <button 
+              type="submit"
+              className="w-full bg-[#ff5500] hover:bg-[#e04b00] active:scale-[0.99] transition text-white font-black py-3.5 rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-[#ff5500]/20 mt-2"
+            >
+              {authMode === 'login' ? 'Entrar no App' : 'Criar Minha Conta'}
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </form>
+
+          <div className="text-center pt-2 border-t border-neutral-800">
+            {authMode === 'login' ? (
+              <p className="text-xs text-neutral-400">
+                Ainda não tem conta?{' '}
+                <button 
+                  onClick={() => { setAuthMode('register'); setAuthError(''); }}
+                  className="text-[#ff5500] font-bold hover:underline"
+                >
+                  Cadastre-se
+                </button>
+              </p>
+            ) : (
+              <p className="text-xs text-neutral-400">
+                Já possui uma conta?{' '}
+                <button 
+                  onClick={() => { setAuthMode('login'); setAuthError(''); }}
+                  className="text-[#ff5500] font-bold hover:underline"
+                >
+                  Fazer Login
+                </button>
+              </p>
+            )}
+          </div>
+
+        </div>
+      </div>
+    );
+  }
+
+  // --- RENDERIZAÇÃO: APLICATIVO PRINCIPAL (APÓS LOGIN) ---
   return (
     <div className="min-h-screen bg-[#0d0d0d] text-slate-100 font-sans flex flex-col justify-between select-none">
       
@@ -365,7 +536,6 @@ export default function App() {
               </div>
             </header>
 
-            {/* LISTA DE FILAMENTOS */}
             <div className="space-y-3">
               {filaments.map((f) => (
                 <div key={f.id} className="bg-[#141414] border border-neutral-800 rounded-2xl p-4 flex items-center justify-between">
@@ -391,7 +561,6 @@ export default function App() {
               ))}
             </div>
 
-            {/* FORMULARIO NOVO FILAMENTO */}
             <form onSubmit={handleAddFilament} className="bg-[#141414] border border-neutral-800 rounded-2xl p-5 space-y-4">
               <h2 className="text-sm font-black text-white">Novo filamento</h2>
               <div className="space-y-1.5">
@@ -482,19 +651,23 @@ export default function App() {
               </div>
             </header>
 
-            {/* CARD DE USUÁRIO */}
+            {/* CARD DE USUÁRIO COM LOGOUT */}
             <div className="bg-[#141414] border border-neutral-800 rounded-2xl p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-[#ff5500] rounded-xl flex items-center justify-center font-black text-white text-base">
-                  {settings.userNom.charAt(0)}
+                  {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-white">{settings.userNom}</h3>
-                  <p className="text-xs text-neutral-500">{settings.userEmail}</p>
+                  <h3 className="text-sm font-black text-white">{user.name || 'Usuário'}</h3>
+                  <p className="text-xs text-neutral-500">{user.email}</p>
                 </div>
               </div>
-              <button className="p-2 text-neutral-500 hover:text-white transition">
-                <LogOut className="w-5 h-5" />
+              <button 
+                onClick={handleLogout}
+                className="p-2.5 bg-neutral-900 border border-neutral-800 rounded-xl text-neutral-400 hover:text-red-400 hover:border-red-500/30 transition flex items-center gap-1.5 text-xs font-bold"
+                title="Sair da Conta"
+              >
+                <LogOut className="w-4 h-4" /> Sair
               </button>
             </div>
 
@@ -502,7 +675,6 @@ export default function App() {
             <div className="space-y-3">
               <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">Custos Operacionais</p>
 
-              {/* Custo Energia */}
               <div className="bg-[#141414] border border-neutral-800 rounded-2xl p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 bg-[#ff5500]/10 rounded-xl text-[#ff5500]">
@@ -522,7 +694,6 @@ export default function App() {
                 />
               </div>
 
-              {/* Potência Impressora */}
               <div className="bg-[#141414] border border-neutral-800 rounded-2xl p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 bg-[#ff5500]/10 rounded-xl text-[#ff5500]">
@@ -541,7 +712,6 @@ export default function App() {
                 />
               </div>
 
-              {/* Desgaste por Hora */}
               <div className="bg-[#141414] border border-neutral-800 rounded-2xl p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 bg-[#ff5500]/10 rounded-xl text-[#ff5500]">
@@ -561,7 +731,6 @@ export default function App() {
                 />
               </div>
 
-              {/* Embalagem (NOVO CAMPO SOLICITADO) */}
               <div className="bg-[#141414] border border-neutral-800 rounded-2xl p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 bg-[#ff5500]/10 rounded-xl text-[#ff5500]">
@@ -581,7 +750,6 @@ export default function App() {
                 />
               </div>
 
-              {/* Mão de Obra (MODIFICADO: FIXO OU HORA) */}
               <div className="bg-[#141414] border border-neutral-800 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -603,7 +771,6 @@ export default function App() {
                   />
                 </div>
 
-                {/* Alternador de Modo de Mão de Obra */}
                 <div className="grid grid-cols-2 gap-2 pt-1 border-t border-neutral-800/60">
                   <button
                     onClick={() => setSettings({...settings, laborType: 'fixed'})}
@@ -628,7 +795,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Margem Padrão */}
               <div className="bg-[#141414] border border-neutral-800 rounded-2xl p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 bg-[#ff5500]/10 rounded-xl text-[#ff5500]">
@@ -647,7 +813,6 @@ export default function App() {
                 />
               </div>
 
-              {/* Imposto Padrão */}
               <div className="bg-[#141414] border border-neutral-800 rounded-2xl p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 bg-[#ff5500]/10 rounded-xl text-[#ff5500]">
@@ -678,7 +843,7 @@ export default function App() {
 
       </div>
 
-      {/* BARRA DE NAVEGAÇÃO INFERIOR (BOTTOM NAV) */}
+      {/* BARRA DE NAVEGAÇÃO INFERIOR */}
       <nav className="fixed bottom-0 left-0 right-0 bg-[#0d0d0d]/95 backdrop-blur-md border-t border-neutral-800 py-2.5 px-4 z-50">
         <div className="max-w-md mx-auto grid grid-cols-4 gap-1">
           
